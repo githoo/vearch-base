@@ -1,0 +1,30 @@
+FROM faiss:20210406-v1
+
+#编译gamma和vearch：依赖faiss和rockdb
+
+RUN wget https://codeload.github.com/facebook/zstd/tar.gz/v1.4.3 && tar zxvf v1.4.3 && cd zstd-1.4.3 && make -j8 && make install
+RUN yum install -y openssl-devel openblas-devel lapack-devel
+
+ADD vearch /vearch
+
+#注意：vearch3.1+，faiss需要1.6.3版本
+
+RUN rm -rf /vearch/build/gamma_build
+RUN sh /vearch/cloud/compile/compile.sh
+#compile.sh包含了./build.sh
+
+RUN mkdir -p compile/
+RUN mkdir -p /vearch/bin;mkdir -p /vearch/lib
+RUN cp -r /vearch/build/bin /vearch/
+RUN cp -r /vearch/build/lib /vearch/
+
+COPY vearch/config/config.toml.example /vearch/config.toml
+
+ENV MASTER_NAME="___MASTER_NAME___"
+ENV LD_LIBRARY_PATH="$LD_LIBRARY_PATH:/vearch/lib/"
+
+RUN yum install -y libgomp blas-devel lapack-devel net-tools
+
+#ENTRYPOINT ["/vearch/bin/vearch","-conf" ,"/vearch/config.toml","-master","$MASTER_NAME"]
+#ENTRYPOINT /vearch/bin/vearch -conf /vearch/config.toml $ENV_ROLE > /opt/log/vearch-$ENV_ROLE.log 2>&1
+ENTRYPOINT /vearch/bin/vearch -conf /vearch/config.toml $ENV_ROLE

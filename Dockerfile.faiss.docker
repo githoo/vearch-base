@@ -1,0 +1,61 @@
+FROM centos:7
+
+#编译faiss和rockdb
+
+ENV IS_GPU="false"
+
+RUN yum -y update
+RUN yum install -y wget gcc gcc-c++ make automake git blas-devel lapack-devel which
+RUN mkdir -p /env/app
+WORKDIR /env/app/
+RUN    wget https://cmake.org/files/v3.12/cmake-3.12.4.tar.gz
+RUN    tar -xzf cmake-3.12.4.tar.gz
+WORKDIR    /env/app/cmake-3.12.4
+RUN    ./bootstrap
+RUN    gmake
+RUN    gmake install
+WORKDIR    /usr/bin
+RUN    ln -s cmake3 cmake
+WORKDIR     /env/app/
+
+#安装GPU-cuda
+RUN if [ "$IS_GPU" = "true" ] ; then echo "yum install git kernel-devel-uname-r file elfutils-libelf-devel blas-devel lapack-devel -y"|sh; fi
+RUN if [ "$IS_GPU" = "true" ] ; then echo "wget http://rpmfind.net/linux/epel/7/ppc64/Packages/d/dkms-2.6.1-1.el7.noarch.rpm && rpm -hiv dkms-2.6.1-1.el7.noarch.rpm"|sh; fi
+RUN if [ "$IS_GPU" = "true" ] ; then echo "wget http://storage.jd.com/v1open/cuda-repo-rhel7-9-0-local-9.0.176-1.x86_64.rpm"|sh; fi
+RUN if [ "$IS_GPU" = "true" ] ; then echo "rpm -i cuda-repo-rhel7-9-0-local-9.0.176-1.x86_64.rpm && yum clean all && yum -y install cuda"|sh; fi
+
+RUN    git clone https://github.com/facebookresearch/faiss.git
+WORKDIR    /env/app/faiss
+
+#注意：vearch3.1+，faiss需要1.6.3版本
+RUN    git checkout v1.6.3
+
+WORKDIR /env/app/faiss
+
+#编译GPU-faiss
+ENV faiss_gpu_compile="./configure --with-cuda=/usr/local/cuda --with-blas=/env/app/faiss_install/libopenblas.so --prefix=/env/app/faiss_install --with-cuda-arch=\"-gencode=arch=compute_35,code=compute_35 -gencode=arch=compute_52,code=compute_52 -gencode=arch=compute_60,code=compute_60 -gencode=arch=compute_61,code=compute_61 -gencode=arch=compute_70,code=sm_70\""
+#编译CPU-faiss
+ENV faiss_cpu_compile="./configure --without-cuda --prefix=/env/app/faiss_install"
+
+#faiss:1.6.3bug: error: function "faiss::gpu::isSupportedNoPrecomputedSubDimSize" has already been defined
+#删除重复文件解决: /env/app/faiss/gpu/impl/PQScanMultiPassNoPrecomputed.cu和/env/app/faiss/gpu/impl/PQCodeDistances.cu
+RUN rm -rf /env/app/faiss/gpu/impl/PQScanMultiPassNoPrecomputed.cu
+RUN rm -rf /env/app/faiss/gpu/impl/PQCodeDistances.cu
+RUN if [ "$IS_GPU" = "true" ] ; then echo $faiss_gpu_compile|sh ; else $faiss_cpu_compile ; fi
+
+RUN    make -j8
+RUN    make install
+WORKDIR     /env/app
+RUN    wget https://github.com/facebook/rocksdb/archive/v6.2.2.tar.gz -O rocksdb-v6.2.2.tar.gz
+RUN    tar -xzf rocksdb-v6.2.2.tar.gz
+WORKDIR     /env/app/rocksdb-6.2.2
+RUN    make shared_lib -j8
+RUN    mkdir -p /env/app/rocksdb_install/lib
+RUN    cp librocksdb.so.6.2.2 /env/app/rocksdb_install/lib
+WORKDIR /env/app/rocksdb_install/lib
+RUN    ln -s librocksdb.so.6.2.2 librocksdb.so.6.2
+RUN    ln -s librocksdb.so.6.2 librocksdb.so
+RUN    cp -r /env/app/rocksdb-6.2.2/include /env/app/rocksdb_install/
+WORKDIR     /env/app/
+RUN    wget https://dl.google.com/go/go1.12.7.linux-amd64.tar.gz
+RUN    tar -xzf go1.12.7.linux-amd64.tar.gz
